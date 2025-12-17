@@ -11,7 +11,7 @@ export const databaseConfig: TypeOrmModuleOptions = {
     database: EnvConfig.DB_DATABASE,
     entities: [__dirname + '/../../**/*.entity{.ts,.js}'],
     synchronize: true,
-    dropSchema: true, // WARNING: Drops all tables on startup - for testing only!
+    dropSchema: false, // WARNING: Drops all tables on startup - for testing only!
     ssl: {
         rejectUnauthorized: false, // Required for Neon and most cloud PostgreSQL providers
     },
