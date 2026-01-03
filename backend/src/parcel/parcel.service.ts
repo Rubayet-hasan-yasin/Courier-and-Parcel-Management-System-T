@@ -17,6 +17,7 @@ import { UserRole } from '../user/enums/user-role.enum';
 
 import { EventsGateway } from '../events/events.gateway';
 import { NotificationService } from '../notification/notification.service';
+import { MapsService } from '../maps/maps.service';
 
 @Injectable()
 export class ParcelService {
@@ -25,6 +26,7 @@ export class ParcelService {
     private readonly parcelRepository: Repository<Parcel>,
     private readonly eventsGateway: EventsGateway,
     private readonly notificationService: NotificationService,
+    private readonly mapsService: MapsService,
   ) { }
 
   private generateTrackingNumber(): string {
@@ -47,6 +49,36 @@ export class ParcelService {
     }
 
     const trackingNumber = this.generateTrackingNumber();
+
+    // Auto-geocode addresses if coordinates not provided
+    if (!createParcelDto.pickupLatitude || !createParcelDto.pickupLongitude) {
+      try {
+        const pickupCoords = await this.mapsService.geocodeAddress(
+          createParcelDto.pickupAddress,
+        );
+        createParcelDto.pickupLatitude = pickupCoords.lat;
+        createParcelDto.pickupLongitude = pickupCoords.lng;
+      } catch (error) {
+        console.warn('Failed to geocode pickup address:', error.message);
+        // Continue without coordinates - map won't show but parcel can be created
+      }
+    }
+
+    if (
+      !createParcelDto.deliveryLatitude ||
+      !createParcelDto.deliveryLongitude
+    ) {
+      try {
+        const deliveryCoords = await this.mapsService.geocodeAddress(
+          createParcelDto.deliveryAddress,
+        );
+        createParcelDto.deliveryLatitude = deliveryCoords.lat;
+        createParcelDto.deliveryLongitude = deliveryCoords.lng;
+      } catch (error) {
+        console.warn('Failed to geocode delivery address:', error.message);
+        // Continue without coordinates - map won't show but parcel can be created
+      }
+    }
 
     const parcel = this.parcelRepository.create({
       ...createParcelDto,
