@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useTrackParcel } from '@/lib/hooks';
 import { useParcelTracking } from '@/lib/socket';
+import ParcelMap from '@/components/ParcelMap';
 
 export default function TrackPage() {
     const [trackingNumber, setTrackingNumber] = useState('');
@@ -145,7 +146,13 @@ export default function TrackPage() {
                         </div>
 
                         <div className="p-6 space-y-6">
+                            {/* Map Section */}
                             <div>
+                                <h3 className="text-lg font-semibold text-gray-900 mb-4">📍 Live Location</h3>
+                                <ParcelMap parcel={parcel} showRoute={true} height="350px" />
+                            </div>
+
+                            <div className="border-t border-gray-200 pt-6">
                                 <h3 className="text-lg font-semibold text-gray-900 mb-4">Route Information</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div>
