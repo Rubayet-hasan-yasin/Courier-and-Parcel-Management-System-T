@@ -11,9 +11,10 @@ import { QrcodeModule } from './qrcode/qrcode.module';
 import { NotificationModule } from './notification/notification.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { EventsModule } from './events/events.module';
+import { MapsModule } from './maps/maps.module';
 
 @Module({
-  imports: [TypeOrmModule.forRoot(databaseConfig), UserModule, AuthModule, ParcelModule, LocationModule, QrcodeModule, NotificationModule, AnalyticsModule, EventsModule],
+  imports: [TypeOrmModule.forRoot(databaseConfig), UserModule, AuthModule, ParcelModule, LocationModule, QrcodeModule, NotificationModule, AnalyticsModule, EventsModule, MapsModule],
   controllers: [AppController],
   providers: [AppService],
 })

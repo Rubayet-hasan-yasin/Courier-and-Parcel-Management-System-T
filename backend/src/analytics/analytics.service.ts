@@ -3,8 +3,8 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
 import { Parcel } from '../parcel/entities/parcel.entity';
 import { createObjectCsvWriter as createCsvWriter } from 'csv-writer';
-import PDFDocument = require('pdfkit');
 import type { Response } from 'express';
+import * as puppeteer from 'puppeteer';
 
 @Injectable()
 export class AnalyticsService {
@@ -20,45 +20,65 @@ export class AnalyticsService {
             whereClause.createdAt = Between(startDate, endDate);
         }
 
-        const [parcels, total] = await this.parcelRepository.findAndCount({
-            where: whereClause,
-            relations: ['customer', 'agent'],
-        });
+        try {
+            // Optimized: Don't load relations for stats, only get the data we need
+            const parcels = await this.parcelRepository.find({
+                where: whereClause,
+                select: ['id', 'status', 'paymentMethod', 'deliveryCharge', 'codAmount', 'createdAt'],
+            });
 
-        const byStatus = parcels.reduce((acc, parcel) => {
-            acc[parcel.status] = (acc[parcel.status] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
+            const total = parcels.length;
 
-        const byPaymentMethod = parcels.reduce((acc, parcel) => {
-            acc[parcel.paymentMethod] = (acc[parcel.paymentMethod] || 0) + 1;
-            return acc;
-        }, {} as Record<string, number>);
+            const byStatus = parcels.reduce((acc, parcel) => {
+                acc[parcel.status] = (acc[parcel.status] || 0) + 1;
+                return acc;
+            }, {} as Record<string, number>);
 
-        const totalRevenue = parcels.reduce(
-            (sum, parcel) => sum + (parcel.deliveryCharge || 0),
-            0,
-        );
+            const byPaymentMethod = parcels.reduce((acc, parcel) => {
+                acc[parcel.paymentMethod] = (acc[parcel.paymentMethod] || 0) + 1;
+                return acc;
+            }, {} as Record<string, number>);
 
-        const totalCOD = parcels
-            .filter((p) => p.paymentMethod === 'cod')
-            .reduce((sum, parcel) => sum + (parcel.codAmount || 0), 0);
+            const totalRevenue = parcels.reduce(
+                (sum, parcel) => sum + (parcel.deliveryCharge || 0),
+                0,
+            );
 
-        const deliveryRate =
-            total > 0 ? ((byStatus['delivered'] || 0) / total) * 100 : 0;
+            const totalCOD = parcels
+                .filter((p) => p.paymentMethod === 'cod')
+                .reduce((sum, parcel) => sum + (parcel.codAmount || 0), 0);
 
-        return {
-            total,
-            byStatus,
-            byPaymentMethod,
-            totalRevenue,
-            totalCOD,
-            deliveryRate: deliveryRate.toFixed(2),
-            dateRange: {
-                start: startDate || parcels[0]?.createdAt,
-                end: endDate || new Date(),
-            },
-        };
+            const deliveryRate =
+                total > 0 ? ((byStatus['delivered'] || 0) / total) * 100 : 0;
+
+            return {
+                total,
+                byStatus,
+                byPaymentMethod,
+                totalRevenue: parseFloat(totalRevenue.toFixed(2)),
+                totalCOD: parseFloat(totalCOD.toFixed(2)),
+                deliveryRate: deliveryRate.toFixed(2),
+                dateRange: {
+                    start: startDate || parcels[0]?.createdAt,
+                    end: endDate || new Date(),
+                },
+            };
+        } catch (error) {
+            console.error('Error fetching dashboard stats:', error);
+            // Return empty stats on error
+            return {
+                total: 0,
+                byStatus: {},
+                byPaymentMethod: {},
+                totalRevenue: 0,
+                totalCOD: 0,
+                deliveryRate: '0.00',
+                dateRange: {
+                    start: startDate || new Date(),
+                    end: endDate || new Date(),
+                },
+            };
+        }
     }
 
     async generateCSVReport(res: Response, startDate?: Date, endDate?: Date) {
@@ -130,69 +150,259 @@ export class AnalyticsService {
     }
 
     async generatePDFReport(res: Response, startDate?: Date, endDate?: Date) {
-        const stats = await this.getDashboardStats(startDate, endDate);
+        try {
+            const stats = await this.getDashboardStats(startDate, endDate);
 
-        const whereClause: any = {};
-        if (startDate && endDate) {
-            whereClause.createdAt = Between(startDate, endDate);
-        }
-
-        const parcels = await this.parcelRepository.find({
-            where: whereClause,
-            relations: ['customer', 'agent'],
-            order: { createdAt: 'DESC' },
-            take: 50,
-        });
-
-        const doc = new PDFDocument({ margin: 50 });
-
-        res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader(
-            'Content-Disposition',
-            `attachment; filename=parcels-report-${Date.now()}.pdf`,
-        );
-
-        doc.pipe(res);
-
-        doc.fontSize(20).text('Courier Management System', { align: 'center' });
-        doc.fontSize(16).text('Parcels Report', { align: 'center' });
-        doc.moveDown();
-
-        doc.fontSize(10).text(
-            `Report Period: ${stats.dateRange.start?.toLocaleDateString()} - ${stats.dateRange.end?.toLocaleDateString()}`,
-            { align: 'center' },
-        );
-        doc.moveDown(2);
-
-        doc.fontSize(14).text('Summary Statistics', { underline: true });
-        doc.moveDown(0.5);
-        doc.fontSize(10);
-        doc.text(`Total Parcels: ${stats.total}`);
-        doc.text(`Delivered: ${stats.byStatus['delivered'] || 0}`);
-        doc.text(`In Transit: ${(stats.byStatus['picked_up'] || 0) + (stats.byStatus['in_transit'] || 0)}`);
-        doc.text(`Failed: ${stats.byStatus['failed'] || 0}`);
-        doc.text(`Delivery Rate: ${stats.deliveryRate}%`);
-        doc.text(`Total Revenue: ৳${stats.totalRevenue}`);
-        doc.text(`Total COD: ৳${stats.totalCOD}`);
-        doc.moveDown(2);
-
-        doc.fontSize(14).text('Recent Parcels', { underline: true });
-        doc.moveDown(0.5);
-        doc.fontSize(8);
-
-        parcels.forEach((parcel, index) => {
-            if (index > 0 && index % 10 === 0) {
-                doc.addPage();
+            const whereClause: any = {};
+            if (startDate && endDate) {
+                whereClause.createdAt = Between(startDate, endDate);
             }
 
-            doc.fontSize(9).text(`${index + 1}. ${parcel.trackingNumber}`, { continued: true });
-            doc.fontSize(8).text(` - ${parcel.status}`, { continued: true });
-            doc.text(` - ${parcel.customer?.name || 'N/A'}`);
-            doc.fontSize(7).text(`   From: ${parcel.pickupAddress}`);
-            doc.text(`   To: ${parcel.deliveryAddress}`);
-            doc.moveDown(0.3);
-        });
+            const parcels = await this.parcelRepository.find({
+                where: whereClause,
+                relations: ['customer', 'agent'],
+                order: { createdAt: 'DESC' },
+                take: 100,
+            });
 
-        doc.end();
+            // Generate HTML template
+            const html = this.generatePDFHTML(stats, parcels);
+
+            // Use Puppeteer to convert HTML to PDF
+            const browser = await puppeteer.launch({
+                headless: true,
+                args: ['--no-sandbox', '--disable-setuid-sandbox'],
+            });
+
+            const page = await browser.newPage();
+            await page.setContent(html, { waitUntil: 'networkidle0' });
+
+            const pdfBuffer = await page.pdf({
+                format: 'A4',
+                printBackground: true,
+                margin: { top: '20px', right: '20px', bottom: '20px', left: '20px' },
+            });
+
+            await browser.close();
+
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader(
+                'Content-Disposition',
+                `attachment; filename=parcels-report-${Date.now()}.pdf`,
+            );
+            res.send(pdfBuffer);
+        } catch (error) {
+            console.error('Error generating PDF report:', error);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    message: 'Failed to generate PDF report',
+                    error: error.message,
+                });
+            }
+        }
+    }
+
+    private generatePDFHTML(stats: any, parcels: any[]): string {
+        const statusColors: Record<string, string> = {
+            pending: '#9CA3AF',
+            picked_up: '#3B82F6',
+            in_transit: '#FBBF24',
+            delivered: '#10B981',
+            failed: '#EF4444',
+        };
+
+        return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 40px;
+            background: #f9fafb;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 3px solid #3B82F6;
+        }
+        .header h1 {
+            color: #1F2937;
+            font-size: 32px;
+            margin-bottom: 8px;
+        }
+        .header h2 {
+            color: #6B7280;
+            font-size: 20px;
+            font-weight: normal;
+        }
+        .header p {
+            color: #9CA3AF;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-left: 4px solid #3B82F6;
+        }
+        .stat-label {
+            color: #6B7280;
+            font-size: 12px;
+            text-transform: uppercase;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .stat-value {
+            color: #1F2937;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .section-title {
+            color: #1F2937;
+            font-size: 18px;
+            font-weight: 600;
+            margin: 30px 0 15px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #E5E7EB;
+        }
+        .parcels-table {
+            width: 100%;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .parcels-table th {
+            background: #F3F4F6;
+            padding: 12px;
+            text-align: left;
+            font-size: 11px;
+            text-transform: uppercase;
+            color: #6B7280;
+            font-weight: 600;
+        }
+        .parcels-table td {
+            padding: 12px;
+            border-top: 1px solid #E5E7EB;
+            font-size: 12px;
+            color: #374151;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .tracking-number {
+            font-family: 'Courier New', monospace;
+            font-weight: 600;
+            color: #1F2937;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #E5E7EB;
+            text-align: center;
+            color: #9CA3AF;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📦 Courier Management System</h1>
+        <h2>Parcels Report</h2>
+        <p>Period: ${stats.dateRange.start?.toLocaleDateString() || 'N/A'} - ${stats.dateRange.end?.toLocaleDateString() || 'N/A'}</p>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-label">Total Parcels</div>
+            <div class="stat-value">${stats.total}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Delivered</div>
+            <div class="stat-value" style="color: #10B981;">${stats.byStatus['delivered'] || 0}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Delivery Rate</div>
+            <div class="stat-value" style="color: #3B82F6;">${stats.deliveryRate}%</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">In Transit</div>
+            <div class="stat-value" style="color: #FBBF24;">${(stats.byStatus['picked_up'] || 0) + (stats.byStatus['in_transit'] || 0)}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total Revenue</div>
+            <div class="stat-value" style="color: #8B5CF6;">৳${stats.totalRevenue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Total COD</div>
+            <div class="stat-value" style="color: #EC4899;">৳${stats.totalCOD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+        </div>
+    </div>
+
+    <h3 class="section-title">Recent Parcels (${parcels.length})</h3>
+
+    <table class="parcels-table">
+        <thead>
+            <tr>
+                <th>Tracking #</th>
+                <th>Customer</th>
+                <th>Route</th>
+                <th>Status</th>
+                <th>Payment</th>
+                <th>Agent</th>
+            </tr>
+        </thead>
+        <tbody>
+            ${parcels.map(parcel => `
+                <tr>
+                    <td>
+                        <span class="tracking-number">${parcel.trackingNumber}</span>
+                        ${parcel.description ? `<br><span style="font-size: 10px; color: #9CA3AF;">${parcel.description}</span>` : ''}
+                    </td>
+                    <td>
+                        <div>${parcel.customer?.name || 'N/A'}</div>
+                        <div style="font-size: 10px; color: #9CA3AF;">${parcel.customer?.email || ''}</div>
+                    </td>
+                    <td style="max-width: 200px;">
+                        <div style="font-size: 10px;">From: ${parcel.pickupAddress}</div>
+                        <div style="font-size: 10px; color: #9CA3AF;">To: ${parcel.deliveryAddress}</div>
+                    </td>
+                    <td>
+                        <span class="status-badge" style="background: ${statusColors[parcel.status] || '#9CA3AF'}; color: white;">
+                            ${parcel.status.replace('_', ' ')}
+                        </span>
+                    </td>
+                    <td>
+                        ${parcel.paymentMethod === 'cod' ? `COD ৳${parcel.codAmount}` : 'Prepaid'}
+                    </td>
+                    <td>${parcel.agent?.name || 'Not Assigned'}</td>
+                </tr>
+            `).join('')}
+        </tbody>
+    </table>
+
+    <div class="footer">
+        Generated on ${new Date().toLocaleString()} | Courier & Parcel Management System
+    </div>
+</body>
+</html>
+        `;
     }
 }
