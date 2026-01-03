@@ -10,6 +10,7 @@ import { useCreateParcel, useMyBookings, useLogout, useGenerateQR } from '@/lib/
 import { useCustomerUpdates } from '@/lib/socket';
 import { getCurrentUser } from '@/lib/auth';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import ParcelMap from '@/components/ParcelMap';
 import { showSuccessToast, showErrorToast } from '@/lib/toast';
 
 const parcelSchema = z.object({
@@ -45,6 +46,7 @@ function CustomerDashboardContent() {
 
     const [qrImage, setQrImage] = useState<string | null>(null);
     const [showQRModal, setShowQRModal] = useState(false);
+    const [selectedParcelForMap, setSelectedParcelForMap] = useState<any>(null);
 
     const { data: bookings, isLoading, refetch } = useMyBookings();
 
@@ -342,7 +344,13 @@ function CustomerDashboardContent() {
                                                 <p className="text-gray-900">{parcel.deliveryAddress}</p>
                                             </div>
                                         </div>
-                                        <div className="mt-4 pt-3 border-t border-gray-100 flex justify-end">
+                                        <div className="mt-4 pt-3 border-t border-gray-100 flex justify-between">
+                                            <button
+                                                onClick={() => setSelectedParcelForMap(parcel)}
+                                                className="px-3 py-1.5 bg-blue-600 text-white text-xs font-medium rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+                                            >
+                                                <span>🗺️</span> View Map
+                                            </button>
                                             <button
                                                 onClick={() => handleShowQR(parcel.id)}
                                                 className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-lg hover:bg-gray-800 transition flex items-center gap-2"
@@ -357,6 +365,30 @@ function CustomerDashboardContent() {
                     </div>
                 </div>
             </div>
+            {/* Map Modal */}
+            {selectedParcelForMap && (
+                <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4" onClick={() => setSelectedParcelForMap(null)}>
+                    <div className="bg-white rounded-lg max-w-4xl w-full p-6" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900">Parcel Location - {selectedParcelForMap.trackingNumber}</h3>
+                            <button
+                                onClick={() => setSelectedParcelForMap(null)}
+                                className="text-gray-500 hover:text-gray-700"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <ParcelMap parcel={selectedParcelForMap} showRoute={true} height="500px" />
+                        <button
+                            onClick={() => setSelectedParcelForMap(null)}
+                            className="mt-4 w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition"
+                        >
+                            Close
+                        </button>
+                    </div>
+                </div>
+            )}
+
             {showQRModal && qrImage && (
                 <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4" onClick={() => setShowQRModal(false)}>
                     <div className="bg-white rounded-lg max-w-sm w-full p-6 text-center" onClick={(e) => e.stopPropagation()}>

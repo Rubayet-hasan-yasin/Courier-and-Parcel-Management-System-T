@@ -7,6 +7,7 @@ import { useAssignedParcels, useUpdateParcelStatus, useLogout } from '@/lib/hook
 import { getCurrentUser } from '@/lib/auth';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import QRCodeScanner from '@/components/QRScanner';
+import ParcelMap from '@/components/ParcelMap';
 import { showSuccessToast, showErrorToast } from '@/lib/toast';
 import { useAgentDailySummary } from '@/lib/agent-summary';
 
@@ -19,6 +20,7 @@ function AgentDashboardContent() {
     const [selectedParcel, setSelectedParcel] = useState<any>(null);
     const [showScanner, setShowScanner] = useState(false);
     const [scannerMode, setScannerMode] = useState<'pickup' | 'delivery'>('pickup');
+    const [selectedParcelForMap, setSelectedParcelForMap] = useState<any>(null);
     const { data: dailySummary } = useAgentDailySummary();
 
     const handleStatusUpdate = async (parcelId: number, status: string) => {
@@ -223,16 +225,48 @@ function AgentDashboardContent() {
                                     </div>
                                 ) : (
                                     getNextStatus(parcel.status).length > 0 && (
-                                        <button
-                                            onClick={() => setSelectedParcel(parcel)}
-                                            className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition"
-                                        >
-                                            Update Status
-                                        </button>
+                                        <div className="mt-4 flex gap-2">
+                                            <button
+                                                onClick={() => setSelectedParcelForMap(parcel)}
+                                                className="flex-1 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm transition"
+                                            >
+                                                🗺️ View Route
+                                            </button>
+                                            <button
+                                                onClick={() => setSelectedParcel(parcel)}
+                                                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm transition"
+                                            >
+                                                Update Status
+                                            </button>
+                                        </div>
                                     )
                                 )}
                             </div>
                         ))}
+                    </div>
+                )}
+
+                {/* Map Modal */}
+                {selectedParcelForMap && (
+                    <div className="fixed inset-0 bg-black/75 flex items-center justify-center z-50 p-4" onClick={() => setSelectedParcelForMap(null)}>
+                        <div className="bg-white rounded-lg max-w-4xl w-full p-6" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex justify-between items-center mb-4">
+                                <h3 className="text-lg font-semibold text-gray-900">Route - {selectedParcelForMap.trackingNumber}</h3>
+                                <button
+                                    onClick={() => setSelectedParcelForMap(null)}
+                                    className="text-gray-500 hover:text-gray-700"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                            <ParcelMap parcel={selectedParcelForMap} showRoute={true} height="500px" />
+                            <button
+                                onClick={() => setSelectedParcelForMap(null)}
+                                className="mt-4 w-full py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium transition"
+                            >
+                                Close
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>
